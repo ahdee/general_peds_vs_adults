@@ -204,9 +204,6 @@ swr = function(string, nwrap=20) {
 }
 swr = Vectorize(swr)
 
-
-
-
 ## how does age distribution look like? 
 
 ggplot(data=v11_age, aes(age_at_dx, fill=age_group )) +
@@ -417,6 +414,7 @@ cov <- function(x){
 ```
 
 
+
 ```{r}
 library ( umap)
 library(FactoMineR)
@@ -535,6 +533,31 @@ testicular = do_clusters( cm = v11_tpm, keyc=v11_age[v11_age$disease == "testicu
 
 
 ( aml$pca + adrenocortical$pca + glioblastoma_multiforme$pca ) / (glioma$pca + lymphoma$pca + testicular$pca) 
+
+```
+
+
+```{r}
+### add ASC samples. 
+
+
+## asc key 
+rna.key  <- read.xlsx( config$spcg.key , sheet="masterkey.stable.txt")
+rna.key[ is.na(rna.key) ] <- ""
+rna.key = rna.key[rna.key$sample.source == "patient" , ]
+rna.key=rna.key[rna.key$RNAseq.id != "None", ]
+rna.key=rna.key[rna.key$patient.id != "None", ]
+
+
+# asc data 
+
+asc = readRDS(  "/data/SUMMARY/TPM/TPM2.rds"  )
+setdiff ( rna.key$RNAseq.id, colnames ( asc ))
+rna.key = rna.key [ rna.key$RNAseq.id %in% colnames ( asc), ]
+
+asc = asc [ , rna.key$RNAseq.id]
+
+
 
 ```
 
