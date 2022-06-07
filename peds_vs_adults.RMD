@@ -1,0 +1,1167 @@
+---
+title: "peds vs adults "
+author: "by Alex"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: FALSE
+editor_options: 
+  chunk_output_type: console
+---
+
+
+<style type="text/css">
+.main-container {
+  max-width: 1800px;
+  margin-left: 20px;
+  margin-right: auto;
+}
+.toc-content {
+  max-width: 1800px;
+  margin-left: 50px;
+  margin-right: auto;
+}
+
+div {
+
+  margin-left: 20px;
+}
+
+
+hr.new1 {
+  border-top: 1px solid #84a8e0;
+}
+
+
+</style>
+
+# DATA {.tabset}
+
+
+
+
+
+<hr>
+
+```{r include=FALSE, echo=FALSE, message=FALSE, warning=FALSE, cache=FALSE}
+cat ( "<hr>")
+```
+
+```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE, cache=FALSE}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE, include = FALSE , cache.lazy = FALSE )
+
+
+library ( parallelDist)
+
+library("DESeq2")
+library ( dplyr)
+library(scales)
+
+library("RColorBrewer")
+library(corrplot)
+library("ggplot2")
+library(gplots)
+
+library(ggrepel)
+library(reshape)
+library(Hmisc)
+
+
+library(stringr)
+
+library(knitr)
+library(kableExtra)
+
+library ( data.table)
+library ( openxlsx)
+options(scipen=999)
+library("ggplot2")
+library ( ggpubr )
+library ( patchwork)
+getPalette = colorRampPalette(brewer.pal(9, "Set1")) # expand color pallete
+
+old.dir = "/projects/lab.mis/post/alex/treehouse/"
+source ( paste0 ( old.dir, 'hr.plots.R') )
+library("openxlsx")
+
+
+config = data.frame ( t ( read.table ( "/projects/spcg/rna/SUMMARY/FIGURES/config.new.txt", header = T  ) ) , stringsAsFactors = F) 
+colnames ( config ) = config[1:1, ]
+config = config [-1,]
+
+
+
+getPalette = colorRampPalette(brewer.pal(9, "Set1")) # expand color pallete
+
+options(scipen=999)
+
+```
+
+```{r}
+
+make.pie <- function ( ftype.freq # frequency table two columns only 
+                       ,name.first = "type" # lable for legend 
+                       , title = "" 
+                       , cc= brewer.pal(5, "Set3") 
+                       , leg.pos = "bottom"
+                       ,pietext= 10
+                      
+){
+  
+  colnames ( ftype.freq )[1] = "type"
+  
+  
+  ftype.freq <- ftype.freq %>% 
+    mutate(
+      cs = rev(cumsum(rev(Freq))),
+      text_y = Freq/2 + lead(cs, 1),
+      text_y = if_else(is.na(text_y), Freq/2, text_y)
+    )  %>%  data.frame()
+  
+
+  
+ gg =  ggplot(ftype.freq, aes(x="", y=Freq, fill=type)) +
+    geom_bar(stat="identity", width=1) +
+    coord_polar("y", start=0) + scale_fill_manual(values = cc )   +
+    xlab("") + ylab("") +
+    # scale_color_manual(values= rep("black", 13) ) +
+    theme(axis.title.x=element_blank(),
+          axis.text.x=element_blank(),
+          axis.ticks.x=element_blank()
+          #, axis.ticks.y=element_blank()
+          #, axis.text.y=element_blank()
+    ) +
+    theme(plot.margin=grid::unit(c(0,0,0,0), "mm")) +
+    theme(
+      strip.background = element_blank(),
+      strip.text = element_blank()
+     
+    ) + theme_void()  + 
+    geom_label_repel(
+      data = ftype.freq, 
+      aes(
+        label = ftype.freq$Freq, y = text_y
+      )
+      , 
+      fontface="bold", 
+      color="black",
+      size = pietext, 
+      point.padding = unit(12.25, "lines"),
+      #  box.padding = unit(.25, "lines"),
+      nudge_x = .3,
+      show.legend = F,
+      #segment.color = cc5
+      segment.alpha = 0
+      #segment.linetype = 2, 
+      #segment.curvature = 40, 
+      #arrow = arrow(length = unit(0.015, "npc"))
+    ) + ggtitle(title) + theme ( legend.position = leg.pos) +  guides(fill=guide_legend(title= name.first))
+ 
+ return ( gg )
+  
+}
+
+
+
+```
+
+
+```{r}
+
+library(reshape)
+library(data.table)
+library(plyr)
+library ( dplyr)
+
+library(openxlsx)
+
+
+```
+
+
+```{r}
+
+est = readRDS(  paste0( "/ehome/resource/public/treehouse/v11/v11.estimate.immuno.rds"))
+
+
+est = data.frame ( t ( est ))
+
+
+
+
+
+
+
+library ( dplyr)
+
+
+resource = "/ehome/resource/"
+v11 = readRDS( paste0( resource, "/public/treehouse/STATIC.TPM.V11.rds" ))
+
+
+
+v11_tpm = log2 ( v11$treehouse + 1) 
+v11.key = v11$tree.key
+
+# only with age 
+v11_age = v11.key[ !is.na( v11.key$age_at_dx ), ]
+v11_age = v11_age[v11_age$age_at_dx != "NA", ]
+v11_age$age_at_dx=  as.numeric(v11_age$age_at_dx)
+
+
+v11_age$age_group = ifelse ( v11_age$age_at_dx <=25, "peds", "adults")
+
+
+swr = function(string, nwrap=20) {
+  paste(strwrap(string, width=nwrap), collapse="\n")
+}
+swr = Vectorize(swr)
+
+
+
+
+## how does age distribution look like? 
+
+ggplot(data=v11_age, aes(age_at_dx, fill=age_group )) +
+  geom_histogram(
+    binwidth = 10,
+    col="grey",
+    #fill=age_group,
+    alpha = 1
+  )
+
+cp = c("adults" ="#00a1f2", "peds" = "#aed3e6")
+
+
+
+
+ggplot(v11_age, aes(x=age_at_dx)) + 
+ geom_histogram(aes(y=..density.. ), colour='black' , fill="#6e9be5", alpha=.2 , binwidth = 5 )+
+ geom_density(alpha=0, fill="grey") +
+  theme(legend.position="none",  legend.key = element_blank(),
+      # element_blank()
+      axis.text.y = element_text(size= 25 ),
+      axis.text.x =  element_text(size= 25 ),
+      axis.title.x = element_text(size=25),
+      axis.title.y     = element_text(size=25), 
+      legend.text      =element_text(size=25),
+      legend.title = element_text(size=25),
+      plot.title = element_text(size = 40, face = "bold", hjust = 0.5)
+      # hjust centers the title
+) + theme(panel.grid.major = element_blank()
+          , panel.grid.minor = element_blank()
+          ,panel.background = element_blank()
+          , axis.line = element_line(colour = "black") # plot border
+) +   scale_x_continuous(limits = c(-5,95),
+                     breaks = seq(0,95,5))
+
+
+
+ 
+temp = data.frame ( table ( v11_age$age_group ) ) 
+colnames ( temp ) <- c("group","total")
+kable(temp , format = "html" , row.names = F, caption = "Age group" ) %>% kable_classic(full_width = F, position = "center")
+
+
+freqdisease = data.frame( table ( v11_age$disease)  )  
+# remove any disease with N < 60 
+freqdisease = freqdisease[ freqdisease$Freq > 30, ]
+freqdisease = freqdisease[ order ( -freqdisease$Freq), ]  
+
+#### pie chart of diseases 
+
+
+
+
+
+
+m1 = data.frame ( table ( v11_age[v11_age$disease %in% as.character(freqdisease$Var1) , c("age_group", "disease")]))
+m1$disease = as.character ( m1$disease)
+m1$age_group  = as.character ( m1$age_group )
+
+m1$disease =  swr(m1$disease)
+
+m1 %>% dplyr::group_by(disease) %>% dplyr::mutate (
+  total = sum ( Freq)
+) %>% group_by(disease, age_group) %>% mutate(
+  per = Freq/total
+) %>% ggplot(., aes(x="", y=per, fill=age_group )) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0)     +
+  xlab("") + ylab("") +
+   #scale_fill_manual(values= outcolor ) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), 
+       
+        #, axis.ticks.y=element_blank()
+        #, axis.text.y=element_blank()
+  ) + theme_void() +
+   theme(legend.position="right",  legend.key = element_blank(),
+          
+          axis.text.y = element_text(size= 10 ),
+          #axis.text.x = element_blank(),
+          axis.title.x = element_text(size=10),
+          
+          axis.title.y     = element_text(size=10), 
+          legend.text      =element_text(size=10), 
+         legend.key.size = unit(1, 'cm'),
+         plot.margin=grid::unit(c(0,0,0,0), "mm")
+    )+  facet_wrap  (disease ~., ncol = 10  ) + 
+  theme(strip.text.x = element_text(size = 10, colour = "black", angle = 0)) +
+  scale_fill_manual(values =cp  ) 
+
+
+
+
+# histogram of diseases with 50/50 
+
+plot_disease = m1 %>% dplyr::group_by(disease) %>% dplyr::mutate (
+  total = sum ( Freq)
+) %>% group_by(disease, age_group) %>% mutate(
+  per = Freq/total
+) %>% filter ( age_group == "peds" &  per > .15 & per < .70 )
+
+#plot_disease = gsub ( "\n", " ", plot_disease$disease)
+
+
+ggplot(v11_age[v11_age$disease %in% gsub ( "\n", " ", plot_disease$disease), ], aes(x=age_at_dx)) + 
+ geom_histogram(aes(y=..density.. ), colour='black' , fill="#6e9be5", alpha=.2 , binwidth = 5 )+
+ geom_density(alpha=0, fill="grey") +
+  theme(legend.position="none",  legend.key = element_blank(),
+      # element_blank()
+      axis.text.y = element_text(size= 25 ),
+      axis.text.x =  element_text(size= 25 ),
+      axis.title.x = element_text(size=25),
+      axis.title.y     = element_text(size=25), 
+      legend.text      =element_text(size=25),
+      legend.title = element_text(size=25),
+      plot.title = element_text(size = 40, face = "bold", hjust = 0.5)
+      # hjust centers the title
+) + theme(panel.grid.major = element_blank()
+          , panel.grid.minor = element_blank()
+          ,panel.background = element_blank()
+          , axis.line = element_line(colour = "black") # plot border
+) + facet_wrap  (disease ~., ncol = 3 , scale="free" ) +
+  theme(strip.text.x = element_text(size = 16, colour = "black", angle = 0))
+
+
+
+# make another pie chart for disease with both ages
+
+m1[ m1$disease %in%   plot_disease$disease, ] %>% dplyr::group_by(disease) %>% dplyr::mutate (
+  total = sum ( Freq)
+) %>% group_by(disease, age_group) %>% mutate(
+  per = Freq/total
+) %>% ggplot(., aes(x="", y=per, fill=age_group )) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0)     +
+  xlab("") + ylab("") +
+   #scale_fill_manual(values= outcolor ) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), 
+       
+        #, axis.ticks.y=element_blank()
+        #, axis.text.y=element_blank()
+  ) + theme_void() +
+   theme(legend.position="bottom",  legend.key = element_blank(),
+          
+          axis.text.y = element_text(size= 10 ),
+          #axis.text.x = element_blank(),
+          axis.title.x = element_text(size=10),
+          
+          axis.title.y     = element_text(size=10), 
+          legend.text      =element_text(size=10), 
+         legend.key.size = unit(1, 'cm'),
+         plot.margin=grid::unit(c(0,0,0,0), "mm")
+    )+  facet_wrap  (disease ~., ncol = 2  ) + 
+  theme(strip.text.x = element_text(size = 20, colour = "black", angle = 0)) +
+  scale_fill_manual(values =cp  ) 
+
+
+
+## gradient > ggplot(data, aes( x = factor(1), group = cluster, fill = strength, weight = size)) + geom_bar(width = 1) + coord_polar( theta = "y") + scale_fill_gradient2()
+
+m2= v11_age[v11_age$disease %in% as.character(freqdisease$Var1) , ] 
+m2$disease =  swr(m2$disease)
+m2 = m2[ order ( m2$age_at_dx), ]
+
+m2 %>% dplyr::group_by(disease) %>% dplyr::mutate (
+  per = 1/n() # this will calculate how much each sample represents because now we want gradient
+) %>% ggplot(., aes(x="", y=per, fill=age_at_dx )) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0)     +
+  xlab("") + ylab("") +
+   #scale_fill_manual(values= outcolor ) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(), 
+       
+        #, axis.ticks.y=element_blank()
+        #, axis.text.y=element_blank()
+  ) + theme_void() +
+   theme(legend.position="none",  legend.key = element_blank(),
+          
+          axis.text.y = element_text(size= 10 ),
+          #axis.text.x = element_blank(),
+          axis.title.x = element_text(size=10),
+          
+          axis.title.y     = element_text(size=10), 
+          legend.text      =element_text(size=10), 
+         legend.key.size = unit(1, 'cm'),
+         plot.margin=grid::unit(c(0,0,0,0), "mm")
+    )+  facet_wrap  (disease ~., ncol = 10  ) + 
+  theme(strip.text.x = element_text(size = 9.5, colour = "black", angle = 0)) +
+  scale_fill_continuous(high = "#132B43", low = "#56B1F7") # reverses color
+
+
+
+
+
+
+
+cov <- function(x){
+    x <- sd(x)/ mean ( abs ( x)  ) * 100
+    return (x)
+}
+
+
+```
+
+
+```{r}
+library ( umap)
+library(FactoMineR)
+library(factoextra)
+library ( patchwork)
+#keyc = v11_age[v11_age$disease == "acute myeloid leukemia", ]
+#cm = v11_tpm[, keyc$th_sampleid]
+# run pca on some of these diseases 
+do_clusters <- function ( cm, keyc, cluster=3, qthis=9 , shape=NA, titleSize=32 ){
+
+disease = unique ( keyc$disease )[1]
+cm = cm[, keyc$th_sampleid]
+
+threshold <- ncol(cm)/3
+keep <- rowSums(cm  > 1) >= threshold
+cm  <- cm [keep, ]
+
+
+sd <- apply (cm, 1,  function(x) cov(x)  )
+
+cm$sd <- as.numeric ( sd )
+
+#cm$sd = ifelse ( is.na( cm$sd), 4, cm$sd)
+
+p = c(.1,.2,.3,.4,.5,.6, .7, .8, .9,.95)
+
+q <- quantile (cm$sd, probs = p   )
+
+cm2 <- cm[cm$sd > as.numeric ( q[9] ),]
+
+
+
+nrow (cm2)
+cm2$sd <- NULL
+
+
+
+
+
+umap_r = umap(t( cm2[ , keyc$th_sampleid] ))
+
+#plot.umap(sarcoma.umap, sarcoma$cancer.subtype, colors = subcolor, cex=3)
+
+ccc= c ( "1"="grey", "2"="#48A462", "3"="#4A72A6")
+
+
+
+df2 <- data.frame(x = umap_r$layout[,1],
+                 y = umap_r$layout[,2], 
+                 age = as.character ( keyc$age_group), 
+                 age2 = as.numeric ( keyc$age_at_dx)
+                 )
+
+umap_p = ggplot(df2, aes(x, y , colour = age )) +
+  geom_point(size=10, alpha=.6 ) +
+     theme_minimal()   + xlab("UMAP 1") + ylab ( "UMAP 2 ") +
+  theme(legend.position="none",  legend.key = element_blank(),
+          
+          axis.text.y = element_text(size= 15 ),
+          #axis.text.x = element_blank(),
+          axis.title.x = element_text(size=20),
+          
+          axis.title.y     = element_text(size=20), 
+          legend.text      =element_text(size=12)
+    ) +  scale_colour_manual(values= cp ) + ggtitle ( disease )
+
+
+
+pca.sarcoma <- PCA( t( cm2 ), graph = FALSE)
+
+pca.sarcoma <- fviz_pca_ind(pca.sarcoma, label="none", addEllipses=TRUE, ellipse.level=0.95,  axes = c(1, 2),  alpha=0  )
+
+
+pca.sarcoma <- pca.sarcoma +geom_point( aes(colour= keyc$age_group  ), size=9.0 , alpha=.4 ) + scale_colour_manual(values=cp) + ggtitle ( disease ) +   theme(legend.position="none")
+
+pca.sarcoma <- pca.sarcoma +
+  theme(legend.position="none",  legend.key = element_blank(),
+      # element_blank()
+      axis.text.y = element_text(size= 25 ),
+      axis.text.x =  element_text(size= 25 ),
+      axis.title.x = element_text(size=25),
+      axis.title.y     = element_text(size=25), 
+      legend.text      =element_text(size=25),
+      legend.title = element_text(size=25),
+      plot.title = element_text(size = titleSize, face = "bold", hjust = 0.5)
+      # hjust centers the title
+) + theme(panel.grid.major = element_blank()
+         # , panel.grid.minor = element_blank()
+          ,panel.background = element_blank()
+          , axis.line = element_line(colour = "black") # plot border
+)
+ 
+ 
+ 
+
+
+return ( list ( umap = umap_p, pca=pca.sarcoma ) )
+
+}  
+
+
+
+
+aml = do_clusters( cm = v11_tpm, keyc=v11_age[v11_age$disease == "acute myeloid leukemia", ], qthis = 9  )
+
+lymphoma = do_clusters( cm = v11_tpm, keyc=v11_age[v11_age$disease == "lymphoma", ], qthis = 9  )
+
+
+glioma = do_clusters( cm = v11_tpm, keyc=v11_age[v11_age$disease == "glioma", ], qthis = 9  )
+
+glioblastoma_multiforme = do_clusters( cm = v11_tpm, keyc=v11_age[v11_age$disease == "glioblastoma multiforme", ], qthis = 9  )
+
+adrenocortical = do_clusters( cm = v11_tpm, keyc=v11_age[v11_age$disease == "adrenocortical carcinoma", ], qthis = 9  )
+testicular = do_clusters( cm = v11_tpm, keyc=v11_age[v11_age$disease == "testicular germ cell tumor", ], qthis = 9  )
+
+
+
+( aml$pca + adrenocortical$pca + glioblastoma_multiforme$pca ) / (glioma$pca + lymphoma$pca + testicular$pca) 
+
+```
+
+
+```{r}
+
+v11_age_noleuk = v11_age[ ! grepl ("leukemia|lymphoma", v11_age$disease), ]
+
+est2 = est[ , v11_age_noleuk$th_sampleid ]
+est2 = data.frame ( t ( est2 ) )
+est2 = merge ( est2, v11_age, by.x = "row.names", by.y = "th_sampleid")
+
+# run correlations 
+
+cor ( est2$ImmuneScore, est2$age_at_dx, method = "spearman")
+est2$age_group2 = ifelse ( est2$age_group == "adult", 1, 0 ) 
+cor.test( est2$ImmuneScore, est2$age_at_dx, method="spearman" )
+
+
+age_imm = glm(age_group2~ImmuneScore, family =  binomial ,data = est2, maxit = 100 )
+
+
+ggplot(est2, aes(x=age_at_dx, y=ImmuneScore)) +
+  geom_point(position = position_jitter(width = 0.5, height = 0.5), color="steelblue", alpha=.5) + 
+  geom_smooth(method=lm
+              , se=TRUE
+              , fullrange=TRUE
+              , color = "black"
+              )+
+  theme_classic() +  stat_cor(method = "pearson", size=12) +
+  theme(legend.position="none", legend.title=element_blank(), legend.key = element_blank(),
+          
+          axis.text.y = element_text(size=20),
+          axis.text.x = element_text(angle = 0, size=35, hjust=.92,vjust=0.1),
+          axis.title.x = element_text(size=30),
+          plot.title = element_text(size=20), 
+          axis.title.y     = element_text(size=30), 
+          legend.text      =element_text(size=12)
+    ) 
+
+
+
+ 
+#est_plot =  reshape2::melt ( as.matrix(v11[gthis, ]) )
+
+imm = ggplot(est2, aes(y=ImmuneScore, x=age_group)) +
+    geom_violin()+ 
+    geom_jitter(shape=19, position=position_jitter(0.07), aes( colour=age_group), size=1 ) +
+    theme_bw() +
+    ylab("Immuno score") +
+    xlab("") +
+    theme(legend.position="none", legend.title=element_blank(), legend.key = element_blank(),
+          
+          axis.text.y = element_text(size=20),
+          axis.text.x = element_text(angle = 0, size=35, hjust=.92,vjust=0.1),
+          axis.title.x = element_text(size=30),
+          plot.title = element_text(size=20), 
+          axis.title.y     = element_text(size=30), 
+          legend.text      =element_text(size=12)
+    ) + stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                     geom = "crossbar", width = .5) +
+   # scale_colour_manual(values = getPalette( length ( unique(tpm.plot$disease)) ) ) +
+    scale_colour_manual(values =cp  ) 
+
+imm = ggpval:: add_pval(imm, pairs = list(c(1, 2)), test='wilcox.test') + ggtitle ( "NO Leukemia, solid and CNS only")
+
+g= reshape2::  melt ( v11_tpm["CD274", v11_age_noleuk$th_sampleid ] ) # CTLA4
+colnames  ( g) = c("tube", "tpm")
+
+est3 = merge ( est2, g, by.x = "Row.names", by.y = "tube")
+
+
+pdl = ggplot(est3, aes(y=tpm, x=age_group)) +
+    geom_violin()+ 
+    geom_jitter(shape=19, position=position_jitter(0.07), aes( colour=age_group), size=1 ) +
+    theme_bw() +
+    ylab("log2 ( tpm + 1)") +
+    xlab("") +
+    theme(legend.position="none", legend.title=element_blank(), legend.key = element_blank(),
+          
+          axis.text.y = element_text(size=20),
+          axis.text.x = element_text(angle = 0, size=35, hjust=.92,vjust=0.1),
+          axis.title.x = element_text(size=30),
+          plot.title = element_text(size=30), 
+          axis.title.y     = element_text(size=30), 
+          legend.text      =element_text(size=12)
+    ) + stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                     geom = "crossbar", width = .5) +
+   # scale_colour_manual(values = getPalette( length ( unique(tpm.plot$disease)) ) ) +
+    scale_colour_manual(values =cp  ) 
+
+pdl = ggpval:: add_pval(pdl, pairs = list(c(1, 2)), test='wilcox.test') + ggtitle ( "PDL1 expression")
+
+
+
+
+
+g= reshape2::  melt ( v11_tpm["CTLA4", v11_age_noleuk$th_sampleid ] ) # CTLA4
+colnames  ( g) = c("tube", "tpm")
+
+est3 = merge ( est2, g, by.x = "Row.names", by.y = "tube")
+
+
+ct= ggplot(est3, aes(y=tpm, x=age_group)) +
+    geom_violin()+ 
+    geom_jitter(shape=19, position=position_jitter(0.07), aes( colour=age_group), size=1 ) +
+    theme_bw() +
+    ylab("log2 ( tpm + 1)") +
+    xlab("") +
+    theme(legend.position="none", legend.title=element_blank(), legend.key = element_blank(),
+          
+          axis.text.y = element_text(size=20),
+          axis.text.x = element_text(angle = 0, size=35, hjust=.92,vjust=0.1),
+          axis.title.x = element_text(size=30),
+          plot.title = element_text(size=30), 
+          axis.title.y     = element_text(size=30), 
+          legend.text      =element_text(size=12)
+    ) + stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                     geom = "crossbar", width = .5) +
+   # scale_colour_manual(values = getPalette( length ( unique(tpm.plot$disease)) ) ) +
+    scale_colour_manual(values =cp  ) 
+
+ct = ggpval:: add_pval(ct, pairs = list(c(1, 2)), test='wilcox.test') + ggtitle ( "CTLA4 expression")
+
+
+
+
+
+```
+
+
+
+```{r}
+
+
+tpm = readRDS(config$TPM )
+tpm$gene = NULL 
+tpm = log2 ( tpm + 1 )
+
+
+library ( entropy )
+
+## remove low expression 
+
+threshold <- ncol(v11_tpm)/2
+keep <- rowSums(v11_tpm  > 2) >= threshold
+keep <- row.names ( v11_tpm)[keep ] 
+
+
+v11SEb = v11_tpm [ keep     ,  ]
+
+# remove least variant genes. 
+sd <- apply (v11SEb , 1,  function(x) cov(x)  )
+
+v11SEb$sd <- as.numeric ( sd )
+p = c( .1,.2,.3,.4,.5,.6, .7, .8, .9,.95)
+q <- quantile (cm$sd, probs = p   )
+
+keep2 = row.names ( v11SEb[ v11SEb$sd > q[1],  ] ) 
+
+v11SEb$sd = NULL 
+
+
+v11SEb_peds = apply (  v11SEb [keep2, v11_age[v11_age$age_group == "peds", ]$th_sampleid], 1, function (x) entropy.empirical(table ( round ( x, 0 ) ) , unit="log2") )  
+v11SEb_adults = apply (  v11SEb[keep2, v11_age[v11_age$age_group == "adults", ]$th_sampleid] , 1, function (x) entropy.empirical(table ( round ( x, 0 ) ) , unit="log2") )  
+
+v11SEb = data.frame ( se = as.numeric ( v11SEb_peds) , gene=names ( v11SEb_peds ), group='peds' )
+v11SEb = rbind ( v11SEb, data.frame ( se = as.numeric ( v11SEb_adults) , gene=names ( v11SEb_adults ), group='adults' )  )
+
+
+gtex_cancer =  apply (  log2 ( v11_gtex [keep2,  ] + 1) , 1, function (x) entropy.empirical(table ( round ( x, 0 ) ) , unit="log2") )
+gtex_cancer = data.frame ( se = as.numeric ( gtex_cancer) , gene=names ( gtex_cancer ), group='normal' )
+v11SEb = rbind ( v11SEb, gtex_cancer  )
+
+
+v11SEb$se = as.numeric ( v11SEb$se)
+
+
+
+
+
+
+
+
+
+```
+
+```{r}
+
+library(ggridges)
+
+
+
+  ggplot( v11SEb , aes(x= se , fill=group)) +
+  geom_histogram(  color="#e9ecef", alpha=0.6, position = 'identity') +
+      theme(legend.position="bottom",  legend.key = element_blank(),
+      # element_blank()
+      axis.text.y = element_text(size= 25 ),
+      axis.text.x =  element_text(size= 25 ),
+      axis.title.x = element_text(size=25),
+      axis.title.y     = element_text(size=25), 
+      legend.text      =element_text(size=25),
+      legend.title = element_text(size=25),
+      plot.title = element_text(size = 40, face = "bold", hjust = 0.5)
+) + theme(panel.grid.major = element_blank()
+          , panel.grid.minor = element_blank()
+          ,panel.background = element_blank()
+          , axis.line = element_line(colour = "black") # plot border
+) +
+  theme(strip.text.x = element_text(size = 16, colour = "black", angle = 0))
+
+
+  
+  
+  ggplot( v11SEb[v11SEb$group != "normal", ], aes(x= se , fill=group)) +
+  geom_histogram(  color="#e9ecef", alpha=0.6, position = 'identity') +
+      theme(legend.position="bottom",  legend.key = element_blank(),
+      # element_blank()
+      axis.text.y = element_text(size= 25 ),
+      axis.text.x =  element_text(size= 25 ),
+      axis.title.x = element_text(size=25),
+      axis.title.y     = element_text(size=25), 
+      legend.text      =element_text(size=25),
+      legend.title = element_text(size=25),
+      plot.title = element_text(size = 40, face = "bold", hjust = 0.5)
+) + theme(panel.grid.major = element_blank()
+          , panel.grid.minor = element_blank()
+          ,panel.background = element_blank()
+          , axis.line = element_line(colour = "black") # plot border
+) +
+  theme(strip.text.x = element_text(size = 16, colour = "black", angle = 0))
+
+
+
+
+```
+
+
+
+
+
+
+```{r}
+
+
+tpm = readRDS(config$TPM )
+tpm$gene = NULL 
+tpm = log2 ( tpm + 1 )
+
+
+library ( entropy )
+
+genelist = readRDS ( "/ehome/resource/annotation/genelist.2021.rds" )
+hugo = genelist$hugo
+genelist = genelist$gene
+v11_gtex = round ( v11$gtex, 1)
+
+se_gene = unique (  genelist$gene) 
+
+# should I use all genes? 
+threshold <- ncol(v11_tpm)/2
+keep <- rowSums(v11_tpm  > 2) >= threshold
+keep <- row.names ( v11_tpm)[keep ] 
+length ( keep )
+v11_tpm[ head ( keep), 1:5]
+se_gene = keep 
+
+
+
+
+se_gene = keep2 
+
+
+se_gene = unique (  genelist$gene) 
+#
+
+
+gtex_cancer = v11_gtex [ row.names ( v11_gtex) %in% se_gene,  ]
+gtex_cancer = log2 ( gtex_cancer + 1)
+
+
+
+gtex_SE = apply (  gtex_cancer, 2,  function (x) entropy.empirical(table ( round ( x, 1) ) , unit="log2") )   
+gtex_SE = data.frame ( gtex_SE)
+gtex_SE$th_sampleid = row.names (gtex_SE )
+gtex_SE$age_group = "adult_normal"
+colnames ( gtex_SE)[1] = "se"
+
+                                   
+v11_SE = apply (  v11_tpm[ row.names ( v11_tpm) %in% se_gene , ], 2, function (x) entropy.empirical(table ( round ( x, 1) ) , unit="log2") )  
+v11_SE = data.frame ( v11_SE)
+v11_SE$th_sampleid = row.names (v11_SE )
+
+v11_SE_c = merge ( v11_SE,v11_age [ , c("th_sampleid", "age_at_dx")],  by = "th_sampleid" ) 
+cor ( v11_SE_c$v11_SE, v11_SE_c$age_at_dx, method = "spearman")
+
+
+se_cmp = merge ( v11_age [ , c("th_sampleid", "age_group")],  v11_SE , by = "th_sampleid" )
+colnames ( se_cmp)[3] = "se"
+se_cmp = rbind ( se_cmp , gtex_SE [ , colnames ( se_cmp)])
+
+
+asc = apply (  tpm[row.names ( tpm) %in% se_gene , ] , 2, function (x) entropy.empirical(table ( round ( x, 1) ) , unit="log2") )  
+asc = data.frame (  th_sampleid  = names ( asc), se=as.numeric ( asc) , age_group="ASC", stringsAsFactors = F)
+
+saveRDS(asc, "/data/SUMMARY/TPM/shannonEntropy.tpm2.rds")
+saveRDS(se_gene, "/data/SUMMARY/TPM/shannonEntropy.genes.rds")
+saveRDS(keep2, "/data/SUMMARY/TPM/genelist_shannonentropy.rds")
+#se_cmp$se = log2 ( se_cmp$se)
+
+se_cmp2= rbind ( se_cmp, asc )
+
+
+```
+
+
+
+
+```{r}
+library ( ggbeeswarm )
+library(car)
+
+
+
+# density
+
+  ggplot( se_cmp, aes(x= se , fill=age_group)) +
+  geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity') +
+      theme(legend.position="none",  legend.key = element_blank(),
+      # element_blank()
+      axis.text.y = element_text(size= 25 ),
+      axis.text.x =  element_text(size= 25 ),
+      axis.title.x = element_text(size=25),
+      axis.title.y     = element_text(size=25), 
+      legend.text      =element_text(size=25),
+      legend.title = element_text(size=25),
+      plot.title = element_text(size = 40, face = "bold", hjust = 0.5)
+      # hjust centers the title
+) + theme(panel.grid.major = element_blank()
+          , panel.grid.minor = element_blank()
+          ,panel.background = element_blank()
+          , axis.line = element_line(colour = "black") # plot border
+) +
+  theme(strip.text.x = element_text(size = 16, colour = "black", angle = 0))+
+    facet_wrap  (age_group ~., ncol = 1, scale="free") 
+
+
+  
+ leveneTest(se ~ age_group, se_cmp[se_cmp$age_group %in% c('adults',"peds"), ]  )
+  
+   ggplot(  se_cmp2 [  se_cmp2$age_group %in% c("adults", "ASC", "peds") , ] , aes(x= se , fill=age_group)) +
+  geom_histogram( color="#e9ecef", alpha=0.6, position = 'identity') +
+      theme(legend.position="none",  legend.key = element_blank(),
+      # element_blank()
+      axis.text.y = element_text(size= 25 ),
+      axis.text.x =  element_text(size= 25 ),
+      axis.title.x = element_text(size=25),
+      axis.title.y     = element_text(size=25), 
+      legend.text      =element_text(size=25),
+      legend.title = element_text(size=25),
+      plot.title = element_text(size = 40, face = "bold", hjust = 0.5)
+      # hjust centers the title
+) + theme(panel.grid.major = element_blank()
+          , panel.grid.minor = element_blank()
+          ,panel.background = element_blank()
+          , axis.line = element_line(colour = "black") # plot border
+) +
+  theme(strip.text.x = element_text(size = 16, colour = "black", angle = 0))+
+    facet_wrap  (age_group ~., ncol = 1, scale="free") 
+ 
+   
+
+   
+   
+   
+   
+ 
+  
+se_cmp_plot <- ggplot( se_cmp2 [  se_cmp2$age_group %in% c("adults", "ASC", "peds") , ], aes(y=se, x=age_group))+
+  geom_quasirandom(aes(fill = age_group ), size = 6, shape = 21, alpha = .5) +
+  theme_bw() +
+  xlab("") +
+  theme(legend.position="none", legend.title=element_blank(), legend.key = element_blank(),
+        
+        axis.text.y = element_text(size= 20 ),
+        axis.text.x = element_text(angle = 0, size= 20 ),
+        axis.title.x = element_text(size=22),
+        plot.title = element_text(size = 40, face = "bold", hjust = 0.5),
+        axis.title.y     = element_text(size=22), 
+        legend.text      =element_text(size=12)
+  ) + stat_summary(fun.y='mean', geom = "crossbar", width = .5, color="black") + xlab ( "") +  ylab ( "") +
+  scale_fill_manual(values = unique (brewer.pal(7, "Dark2") ))  + ggtitle("Shannon Entropy: Adults vs peds") + ylab ( "SE")
+
+## added post=2 to correct for pvalue
+se_cmp_plot = my_add_pval(se_cmp_plot, pairs = list(c(1, 2)  ), test='wilcox.test', post=1, textsize = 10)
+se_cmp_plot = my_add_pval(se_cmp_plot, pairs = list(c(1, 3)  ), test='wilcox.test', post=1, textsize = 10)
+
+se_cmp_plot
+
+ 
+
+
+```
+
+
+
+######### end here 
+
+
+
+```{r}
+est_asc = readRDS( "/projects/spcg/rna/SUMMARY/FIGURES/ESTIMATE.rds" )
+est_asc = data.frame ( t ( est_asc ))
+
+key.file <- config$spcg.key 
+
+key <- read.xlsx(key.file , sheet="masterkey.stable.txt", colNames = TRUE)
+key = key[key$RNAseq.id != "None", ]
+key = key[!is.na(key$patient.id), ]
+sample.os = key [ key$cancer.subtype == "OS", ]
+sample.os = sample.os[!grepl ( "b$|^W", sample.os$RNAseq.id), ]
+main.data_base = "/data/" # this is where some of the previous stuff can be found 
+
+tpm = readRDS(config$TPM )
+tpm$gene = NULL 
+tpm = log2 ( tpm + 1 )
+setdiff ( sample.os$RNAseq.id, colnames ( tpm ))
+setdiff(  colnames (tpm ) , colnames ( est_asc)  )
+
+tpm = tpm [ , sample.os$RNAseq.id]
+
+
+# can't add this yet until its all patient. 
+
+#tpm = rbind ( tpm, est["ImmuneScore", colnames ( tpm) ])
+
+
+
+
+# calculate ratio 
+
+
+temp2 = as.numeric ( tpm[ cGAS , ] )  
+temp2_min = min ( temp2 [ temp2 != 0 ])
+temp2_min = ifelse ( temp2_min <= 0 , .01, temp2_min )
+temp2 = ifelse ( temp2 <= 0 , temp2_min, temp2 )
+
+
+ratio = as.numeric ( tpm[ "ENPP1", ] )  / temp2 
+
+tpm = rbind ( tpm, ratio )
+row.names ( tpm )[ nrow (tpm)] = "ENPP1_cGAS"
+
+
+tpm[ c (  gconvert , 'CSF1R', 'TGFB1' , "ENPP1" , immuno.panel ), 1:4 ]
+
+
+tpm_name = row.names ( tpm )
+tpm_name [ tpm_name %in% as.character ( gconvert) ]
+tpm_name [   tpm_name %in% names ( gconvert) ]
+for ( i in names ( gconvert)){
+  i = gconvert[i] 
+  tpm_name = ifelse ( tpm_name == as.character (i) , names ( i ), tpm_name  )
+}
+
+tpm_name [   tpm_name %in% names ( gconvert) ]
+
+#v11b = v11 
+row.names ( tpm ) = tpm_name
+
+genes = c ( names ( gconvert )  , 'CSF1R', 'TGFB1' , "ENPP1" , c("IL34" , "CCL18", "CD163", "MMP9", "STAT3" , 'CD209', 'IL6', 'CCL22', 'TGFB2' ,'IL10' ), immuno.panel    )
+genes = unique ( genes )
+
+g_plot = genes 
+
+
+tpm[ g_plot , 1:4 ]
+
+
+```
+
+
+
+
+```{r}
+plot.tpm = function ( gthis , dthis=NA, grep_this=NA ){
+
+tpm.plot =  reshape2::melt ( as.matrix(v11[gthis, ]) )
+
+#tpm.plot$value = log2 (tpm.plot$value + 1 )
+colnames ( tpm.plot ) = c("gene","pid", "value")
+
+nkey = v11.key
+if ( !is.na ( grep_this)){
+  nkey = nkey [ grepl ( grep_this, nkey$disease), ]
+}
+
+tpm.plot =  merge ( tpm.plot, nkey, by.x = "pid", by.y="th_sampleid" )
+
+tpm.plot = tpm.plot [ !duplicated ( tpm.plot), ]
+# get the mean. 
+
+g2 = tpm.plot %>% dplyr::group_by(disease ) %>%
+    dplyr::summarise(
+        mean = mean(value)
+    ) %>%
+    
+    data.frame()
+
+g2 = g2[ order ( g2$mean), ]
+
+#if ( !is.na ( dthis )){
+ # tpm.plot$disease = factor ( tpm.plot$disease, levels=g2$disease)
+#} else {
+ # tpm.plot$disease = factor ( tpm.plot$disease, levels= rev ( unique ( c ( dthis, g2$disease) ) ) )
+#}
+
+tpm.plot$disease = factor ( tpm.plot$disease, levels=g2$disease)
+
+
+q1 = quantile ( tpm.plot$value, probs=c(.75, .95 ) )
+
+tpm.plot$color = ifelse( tpm.plot$disease == dthis, "red", "grey" )
+
+# block 1 
+ggplot(tpm.plot, aes(y=value, x=disease)) +
+    geom_violin()+ 
+    geom_jitter(shape=19, position=position_jitter(0.07), aes( colour=color), size=1 ) +
+    theme_bw() +
+    ylab("log2(tpm+1)") +  coord_flip() +
+    xlab("") +
+    theme(legend.position="none", legend.title=element_blank(), legend.key = element_blank(),
+          
+          axis.text.y = element_text(size=20),
+          axis.text.x = element_text(angle = 90, size=35, hjust=.92,vjust=0.1),
+          axis.title.x = element_text(size=30),
+          plot.title = element_text(size=30), 
+          axis.title.y     = element_text(size=30), 
+          legend.text      =element_text(size=12)
+    ) + stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                     geom = "crossbar", width = .5) +
+   # scale_colour_manual(values = getPalette( length ( unique(tpm.plot$disease)) ) ) +
+    scale_colour_manual(values = c("grey","#cf554c")  ) +
+    geom_hline(yintercept = as.numeric(q1[2]), color="blue") + ggtitle( gthis )
+
+
+}
+
+
+
+
+
+plot.tpm.gtex = function ( gthis , dthis=NA ){
+
+tpm.plot =  reshape2::melt ( as.matrix(gtex[gthis, ]) )
+
+colnames ( tpm.plot ) = c("gene","pid", "value")
+
+tpm.plot =  merge ( tpm.plot, gtex.key, by.x = "pid", by.y="sample" )
+tpm.plot = tpm.plot [ !duplicated ( tpm.plot), ]
+
+
+
+# get the mean. 
+
+g2 = tpm.plot %>% dplyr::group_by(type1 ) %>%
+    dplyr::summarise(
+        mean = mean(value)
+    ) %>%
+    
+    data.frame()
+
+g2 = g2[ order ( g2$mean), ]
+
+#if ( !is.na ( dthis )){
+ # tpm.plot$disease = factor ( tpm.plot$disease, levels=g2$disease)
+#} else {
+ # tpm.plot$disease = factor ( tpm.plot$disease, levels= rev ( unique ( c ( dthis, g2$disease) ) ) )
+#}
+
+tpm.plot$type1 = factor ( tpm.plot$type1, levels=g2$type1)
+
+
+q1 = quantile ( tpm.plot$value, probs=c(.75, .95 ) )
+
+tpm.plot$color = ifelse( tpm.plot$type1 %in% dthis, "red", "grey" )
+
+# block 1 
+ggplot(tpm.plot, aes(y=value, x=type1)) +
+    geom_violin()+ 
+    geom_jitter(shape=19, position=position_jitter(0.07), aes( colour=color), size=1 ) +
+    theme_bw() +
+    ylab("log2(tpm+1)") +  coord_flip() +
+    xlab("") +
+    theme(legend.position="none", legend.title=element_blank(), legend.key = element_blank(),
+          
+          axis.text.y = element_text(size=20),
+          axis.text.x = element_text(angle = 90, size=35, hjust=.92,vjust=0.1),
+          axis.title.x = element_text(size=30),
+          plot.title = element_text(size=30), 
+          axis.title.y     = element_text(size=30), 
+          legend.text      =element_text(size=12)
+    ) + stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                     geom = "crossbar", width = .5) +
+   # scale_colour_manual(values = getPalette( length ( unique(tpm.plot$disease)) ) ) +
+    scale_colour_manual(values = c("grey","#cf554c")  ) +
+    geom_hline(yintercept = as.numeric(q1[2]), color="blue") + ggtitle( gthis )
+
+
+}
+
+
+
+```
+
+
+
