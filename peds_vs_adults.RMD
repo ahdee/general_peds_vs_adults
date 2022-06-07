@@ -65,6 +65,12 @@ library(gplots)
 library(ggrepel)
 library(reshape)
 library(Hmisc)
+library(reshape)
+library(data.table)
+library(plyr)
+library ( dplyr)
+
+library(openxlsx)
 
 
 library(stringr)
@@ -166,30 +172,11 @@ make.pie <- function ( ftype.freq # frequency table two columns only
 ```
 
 
-```{r}
-
-library(reshape)
-library(data.table)
-library(plyr)
-library ( dplyr)
-
-library(openxlsx)
-
-
-```
-
 
 ```{r}
 
 est = readRDS(  paste0( "/ehome/resource/public/treehouse/v11/v11.estimate.immuno.rds"))
-
-
 est = data.frame ( t ( est ))
-
-
-
-
-
 
 
 library ( dplyr)
