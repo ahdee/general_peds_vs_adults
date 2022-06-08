@@ -175,7 +175,7 @@ make.pie <- function ( ftype.freq # frequency table two columns only
 
 ```{r}
 
-est = readRDS(  paste0( "/ehome/resource/public/treehouse/v11/v11.estimate.immuno.rds"))
+est = readRDS(  paste0( "/projects/spcg/rna/SUMMARY/ESTIMATE/EST.rds"))
 est = data.frame ( t ( est ))
 
 
@@ -556,8 +556,12 @@ setdiff ( rna.key$RNAseq.id, colnames ( asc ))
 rna.key = rna.key [ rna.key$RNAseq.id %in% colnames ( asc), ]
 
 asc = asc [ , rna.key$RNAseq.id]
+setdiff ( rna.key$RNAseq.id, colnames ( asc ))
 
-
+# we need to make a asc_leuk and asc_solid keys
+table ( rna.key$cancer.type )
+asc_key_solid = rna.key [ rna.key$cancer.type %in% c ( "CNS" ,   "Solid"  ),   ] 
+asc_key_leuk = rna.key [ rna.key$cancer.type %in% c ( "Leukemia"   ),   ] 
 
 ```
 
@@ -570,6 +574,10 @@ est2 = est[ , v11_age_noleuk$th_sampleid ]
 est2 = data.frame ( t ( est2 ) )
 est2 = merge ( est2, v11_age, by.x = "row.names", by.y = "th_sampleid")
 
+### make one for asc samples. 
+asc_est = data.frame ( t ( est[ , rna.key$RNAseq.id] ))
+asc_est = merge ( asc_est, rna.key[ , c("RNAseq.id",  "cancer.subtype" )], by.x="row.names", by.y="RNAseq.id")
+asc_est$age_group = "peds"
 # run correlations 
 
 cor ( est2$ImmuneScore, est2$age_at_dx, method = "spearman")
@@ -601,9 +609,22 @@ ggplot(est2, aes(x=age_at_dx, y=ImmuneScore)) +
 
 
  
-#est_plot =  reshape2::melt ( as.matrix(v11[gthis, ]) )
 
-imm = ggplot(est2, aes(y=ImmuneScore, x=age_group)) +
+######### combining asc est with treehouse
+## subset and clean up treehouse a bit 
+
+# harmonized colname
+solid_temp = est2 [ , c(  "Row.names" , "StromalScore" , "ImmuneScore" , "ESTIMATEScore"  ,  "purity" ,   "disease", "age_group" )] 
+colnames ( solid_temp )[ which ( colnames(solid_temp) %in% c("disease"))] = "cancer.subtype"
+# removing redundant samples 
+solid_temp = solid_temp[ ! solid_temp$Row.names %in% rna.key$RNAseq.id, ]
+
+# merging two solid/cns groups together 
+asc_est$age_group = "peds" 
+est_solid = rbind (solid_temp , asc_est[ asc_est$Row.names %in% asc_key_solid$RNAseq.id, ]  )
+
+
+imm = ggplot(est_solid, aes(y=ImmuneScore, x=age_group)) +
     geom_violin()+ 
     geom_jitter(shape=19, position=position_jitter(0.07), aes( colour=age_group), size=1 ) +
     theme_bw() +
@@ -624,11 +645,55 @@ imm = ggplot(est2, aes(y=ImmuneScore, x=age_group)) +
 
 imm = ggpval:: add_pval(imm, pairs = list(c(1, 2)), test='wilcox.test') + ggtitle ( "NO Leukemia, solid and CNS only")
 
-g= reshape2::  melt ( v11_tpm["CD274", v11_age_noleuk$th_sampleid ] ) # CTLA4
+# I'm not longer convinced that peds have lower immunoscore - because breaking up asc samples you can see a big difference 
+# this might have to do with purity, so would have to check that soon. 
+
+asc_est$age_group = "asc_peds" 
+est_solid = rbind (solid_temp , asc_est[ asc_est$Row.names %in% asc_key_solid$RNAseq.id, ]  )
+
+
+ ggplot(est_solid, aes(y=ImmuneScore, x=age_group)) +
+    geom_violin()+ 
+    geom_jitter(shape=19, position=position_jitter(0.07), aes( colour=age_group), size=1 ) +
+    theme_bw() +
+    ylab("Immuno score") +
+    xlab("") +
+    theme(legend.position="none", legend.title=element_blank(), legend.key = element_blank(),
+          
+          axis.text.y = element_text(size=20),
+          axis.text.x = element_text(angle = 0, size=35, hjust=.92,vjust=0.1),
+          axis.title.x = element_text(size=30),
+          plot.title = element_text(size=20), 
+          axis.title.y     = element_text(size=30), 
+          legend.text      =element_text(size=12)
+    ) + stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                     geom = "crossbar", width = .5) 
+
+
+
+
+
+
+
+```
+
+
+```{r}
+
+cp = c( cp, c(asc_peds="#aed3e6"))
+comb_key = est_solid
+asc_solid = log2 ( asc + 1 )
+
+comb_tpm = v11_tpm[, est_solid$th_sampleid ]  
+comb_tpm = comb_tpm [ , ! colnames ( comb_tpm) %in% colnames ( asc_solid )]
+comb_tpm = merge ( asc_solid, comb_tpm , by="row.names")
+row.names ( comb_tpm ) = comb_tpm$Row.names
+
+
+g= reshape2::  melt ( comb_tpm["CD274", est_solid$Row.names ] ) # CTLA4
 colnames  ( g) = c("tube", "tpm")
 
-est3 = merge ( est2, g, by.x = "Row.names", by.y = "tube")
-
+est3 = merge ( est_solid, g, by.x = "Row.names", by.y = "tube")
 
 pdl = ggplot(est3, aes(y=tpm, x=age_group)) +
     geom_violin()+ 
@@ -650,15 +715,15 @@ pdl = ggplot(est3, aes(y=tpm, x=age_group)) +
     scale_colour_manual(values =cp  ) 
 
 pdl = ggpval:: add_pval(pdl, pairs = list(c(1, 2)), test='wilcox.test') + ggtitle ( "PDL1 expression")
+pdl = ggpval:: add_pval(pdl, pairs = list(c(1, 3)), test='wilcox.test') 
 
 
 
 
-
-g= reshape2::  melt ( v11_tpm["CTLA4", v11_age_noleuk$th_sampleid ] ) # CTLA4
+g= reshape2::  melt ( comb_tpm["CTLA4", est_solid$Row.names ] ) # CTLA4
 colnames  ( g) = c("tube", "tpm")
 
-est3 = merge ( est2, g, by.x = "Row.names", by.y = "tube")
+est3 = merge ( est_solid, g, by.x = "Row.names", by.y = "tube")
 
 
 ct= ggplot(est3, aes(y=tpm, x=age_group)) +
@@ -681,8 +746,15 @@ ct= ggplot(est3, aes(y=tpm, x=age_group)) +
     scale_colour_manual(values =cp  ) 
 
 ct = ggpval:: add_pval(ct, pairs = list(c(1, 2)), test='wilcox.test') + ggtitle ( "CTLA4 expression")
+ct = ggpval:: add_pval(ct, pairs = list(c(1, 3)), test='wilcox.test') 
 
 
+
+```
+
+```{r}
+
+# now lets calculate genes that are significantly different 
 
 
 
