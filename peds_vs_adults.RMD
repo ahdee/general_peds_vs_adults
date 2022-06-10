@@ -754,10 +754,230 @@ ct = ggpval:: add_pval(ct, pairs = list(c(1, 3)), test='wilcox.test')
 
 ```{r}
 
-# now lets calculate genes that are significantly different 
+
+#### goal is to find "hot spots" in the genome 
+# do wilcox test for each gene. 
+# bin genome into 1M bins 
+# calculate average genes that are significantly different up / down by chromosome
+# use poisson test to see if bin has sinificantly, up / down genes than by chance. 
+
+library ( GenomicRanges  )
 
 
 
+
+# remove extremely low expression 
+threshold <- ncol(comb_tpm)/4
+keep <- rowSums(comb_tpm  > 1) >= threshold
+keep <- row.names ( comb_tpm)[keep ] 
+
+# extract ids of peds and adults --> use for downstream wilcox 
+ped_id = est_solid[est_solid$age_group %in% c ( "peds", "asc_peds"),  ]$Row.names
+adult_id = est_solid[est_solid$age_group %in% c ( "adults"),  ]$Row.names
+
+# calculate wilcox pv and logfc
+results_pv = sapply ( keep , function ( x ) 
+wilcox.test(as.numeric ( comb_tpm[x,  ped_id  ]  )   , as.numeric ( comb_tpm[x,  adult_id  ]  )    )$p.value
+)
+
+results_median = sapply (keep , function ( x ) 
+median (as.numeric ( comb_tpm[x,  ped_id  ]  ) )   -  median ( as.numeric ( comb_tpm[x,  adult_id  ]  )    ) 
+)
+
+deg = merge ( data.frame ( results_pv ) , data.frame ( results_median) , by="row.names")
+
+# calculate fdr 
+
+deg$fdr = round ( p.adjust ( deg$results_pv, method = "fdr", n=nrow ( deg)), 4 ) 
+deg$results_pv = round (  deg$results_pv, 5 )
+
+# define what is significant here. 
+# will also consider a small logfc change 
+
+fdr = .05 
+logfc = .5
+deg$class = ifelse ( deg$results_median < 0, "down", "up")
+deg$is_sig = ifelse ( deg$fdr < fdr & deg$results_median  >  logfc, "up", 
+                        ifelse ( 
+                          deg$fdr < fdr & deg$results_median < -logfc, "down"  
+                      , "no-change"  ) )
+
+
+#incorporate the genomic ranges
+## we need to first figure out the genomic pos of each of the genes 
+# this was derived from exisitng toil output so the names can be matched most closely
+
+ens = readRDS("/ehome/resource/annotation/toil/toil_gene_info.rds" )
+
+deg2 = merge ( deg, ens$df[ , c( "gene_name", "chromosome_name", "start_position" ,  "end_position" )], by.x="Row.names", by.y="gene_name")
+colnames ( deg2)[1] = "gene_name"
+
+deg2$chr = deg2$chromosome_name
+
+# convert to grange so that we can find overlapping 
+deg2 = makeGRangesFromDataFrame( deg2, keep.extra.columns = TRUE,
+                                  seqnames.field=c("chromosome_name"), 
+                                 start.field="start_position", 
+                                 end.field=c("end_position"),
+                                  )
+
+# import bed file binning in 1MB format 
+bed = read.table( "/ehome/resource/annotation/bins/genomeM.fa.1Mb.bed", sep="\t")
+# remove chrM only 1 entry 
+bed = bed[!bed$V1 %in% c ( "chrM" ) , ]
+
+# removing every other row because bed file has 500 K overlap
+bed2 = data.frame ()
+for ( b in unique ( bed$V1)){
+  #print ( b )
+  b = bed[bed$V1 == b, ]
+  rm = seq(2, nrow ( b), 2)
+  b = b[ -rm, ]
+  bed2 = rbind ( bed2, b )
+}
+
+
+bed2$bin = paste0("b", seq(1, nrow ( bed2)))
+bed = bed2
+# convert bed to grange for overlapping 
+bed = makeGRangesFromDataFrame( bed, keep.extra.columns = TRUE,
+                                  seqnames.field=c("V1"), start.field="V2", end.field=c("V3"),
+                                  )
+
+
+# merge by overlap so we know if genes falls unto a certain bin
+odeg = mergeByOverlaps ( deg2, bed)
+odeg =odeg[ order ( odeg$bed), ]
+odeg$bed = NULL # this is weird quirk where if I don't rm this it will cause some strange row.name duplication issue and cannot convert to df
+
+odeg = data.frame (odeg, stringsAsFactors = F) 
+
+# tabulate all the up and down in bin 
+tap = odeg %>%  dplyr::  group_by(bin) %>% dplyr::summarise ( 
+  up  = length(is_sig[is_sig == "up"])  ,
+  down =  length(is_sig[is_sig == "down"])  ,
+  both = length(is_sig[is_sig != "no-change"] ), 
+  total = n(), 
+  chr = unique ( chr)
+  )  %>% ### now find the mean up and down by chromosome  
+  
+  dplyr:: group_by ( chr ) %>% dplyr::mutate ( 
+  up_mean = mean(up)  ,
+  down_mean =  mean ( down )  ,
+  both_mean = mean(both), 
+  total_mean = mean ( total )
+  ) %>% data.frame()
+
+# order by bin 
+tap=tap[gtools::mixedorder (tap$bin ) , ]
+
+# use poisson.test to see if bin has more than by chance up or down 
+
+tap2 = tap %>%  dplyr::  group_by(bin)  %>% dplyr::mutate ( 
+  up_pos =format ( poisson.test(up,  r = up_mean)$p.value , scientific = FALSE )
+  ,down_pos =format ( poisson.test(down,  r = down_mean)$p.value , scientific = FALSE )
+  ) %>% data.frame ( )
+
+# we are only going to consider what is more than by chance not less.  Easier to intepret 
+
+tap2$up_pv = ifelse ( 
+  tap2$up_pos < .05 & tap2$up > tap2$up_mean, 1, 0 
+  )
+
+tap2$down_pv = ifelse ( 
+  tap2$down_pos < .05 & tap2$down > tap2$down_mean, -1, 0 
+  )
+
+tap_plot = melt (tap2 [ , c("bin", "up_pv", "down_pv")]  )
+tap_plot = tap_plot[ order ( tap_plot$bin), ]
+
+tap_plot = merge  ( tap_plot, bed2 [ , c("V1", "bin")], by="bin")
+
+
+
+
+tap_plot = tap_plot [ tap_plot$V1 != "chrY", ]
+
+tap_plot$chr = factor ( tap_plot$V1, levels = c( "chr1","chr2","chr3","chr4","chr5","chr6","chr7","chr8","chr9"
+,"chr10","chr11","chr12","chr13","chr14","chr15","chr16","chr17","chr18","chr19","chr20","chr21","chr22",
+"chrX")     )
+
+
+
+tap_plot$bin = factor ( tap_plot$bin, levels= unique ( tap_plot$bin))
+
+## find annotatation coords for each chr
+## this is so that we can plot the border later. 
+  temp = tap_plot [ !duplicated ( tap_plot$bin), ]
+  annt_coord = c()
+  for ( c in unique ( tap_plot$chr)){
+    annt_coord = c( annt_coord, rev ( which ( temp$chr == c )) [1] )
+  }
+ 
+annt_coord = sort ( annt_coord )  
+names ( annt_coord) = c("chr1","chr2","chr3","chr4","chr5","chr6","chr7","chr8","chr9"
+,"chr10","chr11","chr12","chr13","chr14","chr15","chr16","chr17","chr18","chr19","chr20","chr21","chr22",
+"chrX")
+names ( annt_coord)  = gsub ("chr", "", names ( annt_coord )  )
+
+
+### plot facet so that each chr is space accordingly
+
+  ggplot( data = tap_plot , aes(x=bin, y=value )) +
+    geom_point( aes ( color=factor ( value) ), size=1.25, shape=15) +
+     theme_void() + # remove everything 
+    theme(legend.position = "none"
+          , axis.line = element_line(colour = "black") ) + 
+    # remove zero break 
+    scale_y_continuous(breaks=c (-1.5,  1.5) ) +  
+    # delete 0 to cleanup 
+    scale_color_manual (values=c ( "1" = "#c44d35", "-1" = "#86a7b8", "0" = "white" )) + 
+     facet_grid(.~chr, scales = "free", space="free"  ) +
+    ## add lines so that it can be easier to distinguish
+    theme(panel.spacing = unit(.35, "lines"),
+        panel.border = element_rect(color = "grey", fill = NA, size = .2), 
+        strip.background = element_rect(color = "black", size = .2)
+        ,strip.text.x = element_text(size = 15, colour = "black", angle = 90)
+        ) 
+
+# facet without space to expand it a bit 
+  
+  ggplot( data = tap_plot , aes(x=bin, y=value )) +
+    geom_point( aes ( color=factor ( value) ), size=1.25, shape=15) +
+     theme_void() +
+    theme(legend.position="none",  legend.key = element_blank(),
+
+      axis.text.x =  element_blank( ),
+
+) + theme(panel.grid.major = element_blank()
+          , panel.grid.minor = element_blank()
+          ,panel.background = element_blank()
+          , axis.line = element_line(colour = "black") # plot border
+) + scale_y_continuous(breaks=c (-1.5,  1.5) ) +  scale_color_manual (values=c ( "1" = "#c44d35", "-1" = "#86a7b8", "0" = "white" )) + 
+     facet_wrap(chr~., scales = "free"  )
+
+
+# ignore this, is basically like the facet grid only doing this with ggplot directly 
+  ggplot( data = tap_plot , aes(x=bin, y=value )) +
+    geom_point( aes ( color=factor ( value) ), size=1.25) +
+     theme_void() +
+    theme(legend.position="none",  legend.key = element_blank(),
+
+      axis.text.x =  element_blank( ),
+
+) + theme(panel.grid.major = element_blank()
+          , panel.grid.minor = element_blank()
+          ,panel.background = element_blank()
+          , axis.line = element_line(colour = "black") # plot border
+) + scale_y_continuous(breaks=c (-1.5,  1.5) ) +  scale_color_manual (values=c ( "1" = "#c44d35", "-1" = "#86a7b8", "0" = "white" ))  +
+  
+geom_vline(xintercept= c ( annt_coord ), color="grey" ) + 
+    # need to 
+geom_text_repel(data=data.frame ( annt_coord=as.numeric ( annt_coord)-2, l=names ( annt_coord) ) , aes(x=annt_coord, y=-1.2, label=l)
+                , colour="black", angle=0, vjust = 0, text=element_text(size=11)
+                , nudge_x = -1.3#, direction="both"
+                )
+ 
 ```
 
 
